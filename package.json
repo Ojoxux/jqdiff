@@ -1,0 +1,27 @@
+{
+  "name": "jqdiff",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "jqdiff": "./dist/cli.js"
+  },
+  "scripts": {
+    "build:probe": "tsup src/probe/index.ts --format iife --out-dir dist/probe --platform browser",
+    "build:recorder": "tsup src/recorder/index.ts --format iife --out-dir dist/recorder --platform browser",
+    "build": "tsc -p tsconfig.json && pnpm build:probe && pnpm build:recorder",
+    "test": "vitest run",
+    "fixture": "node fixture/server.mjs"
+  },
+  "devDependencies": {
+    "@types/node": "^26.4.1",
+    "jsdom": "^30.0.1",
+    "playwright": "^1.62.1",
+    "tsup": "^8.5.1",
+    "typescript": "^7.0.2",
+    "vitest": "^4.1.11"
+  },
+  "dependencies": {
+    "jquery": "^3.7.1"
+  }
+}
