@@ -1,0 +1,7 @@
+node_modules/
+dist/
+out/
+*.log
+
+# 検討履歴。SSOT は docs/architecture.md
+docs/superpowers/
