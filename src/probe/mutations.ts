@@ -1,39 +1,62 @@
 import type { MutationEntry } from '../types.js'
 import { buildSelector, describeNode } from './selector.js'
-import type { ProbeState } from './state.js'
+import type { PendingMutation, ProbeState } from './state.js'
 
-function toEntry(record: MutationRecord, patterns: RegExp[]): MutationEntry {
-  const el = record.target.nodeType === 1 ? (record.target as Element) : record.target.parentElement
-  const target = el ? buildSelector(el, patterns) : describeNode(record.target, patterns)
+function isScript(node: Node): boolean {
+  return node.nodeType === 1 && (node as Element).tagName === 'SCRIPT'
+}
+
+/**
+ * 記録しても意味のないノード。
+ * script は移行の前後で必ず形が変わる(jQuery の .html() は type を書き換えて head で評価し、
+ * innerHTML は実行しないので作り直す)一方、実行結果そのものは他の記録に必ず現れる。
+ * 空白だけのテキストノードは見た目にも意味にも出ない。
+ */
+function isNoise(node: Node): boolean {
+  if (isScript(node)) return true
+  return node.nodeType === 3 && (node.textContent ?? '').trim() === ''
+}
+
+function toEntry(record: MutationRecord, patterns: RegExp[]): PendingMutation | null {
+  const el =
+    record.target.nodeType === 1 ? (record.target as Element) : record.target.parentElement
+  if (!el || isScript(el)) return null
+
+  const target = buildSelector(el, patterns)
 
   if (record.type === 'attributes') {
     const name = record.attributeName ?? ''
-    return {
+    const entry: MutationEntry = {
       type: 'attributes',
       target,
       attributeName: name,
       oldValue: record.oldValue,
       // flush 時点の現在値を読む。同一属性の連続変化は collapseMutations が
       // 「最初の oldValue と最後の newValue」に畳むので結果は一致する。
-      newValue: el ? el.getAttribute(name) : null,
+      newValue: el.getAttribute(name),
     }
+    return { entry, element: el }
   }
 
   if (record.type === 'characterData') {
-    return {
+    const entry: MutationEntry = {
       type: 'characterData',
       target,
       oldValue: record.oldValue,
       newValue: record.target.textContent,
     }
+    return { entry, element: el }
   }
 
-  return {
-    type: 'childList',
-    target,
-    added: Array.from(record.addedNodes).map((n) => describeNode(n, patterns)),
-    removed: Array.from(record.removedNodes).map((n) => describeNode(n, patterns)),
-  }
+  const added = Array.from(record.addedNodes)
+    .filter((n) => !isNoise(n))
+    .map((n) => describeNode(n, patterns))
+  const removed = Array.from(record.removedNodes)
+    .filter((n) => !isNoise(n))
+    .map((n) => describeNode(n, patterns))
+  if (added.length === 0 && removed.length === 0) return null
+
+  return { entry: { type: 'childList', target, added, removed }, element: el }
 }
 
 /** MutationObserver を設置する。戻り値を呼ぶと記録を停止する。 */
@@ -42,13 +65,11 @@ export function installMutationRecorder(state: ProbeState): () => void {
 
   const drain = (records: MutationRecord[]): void => {
     for (const record of records) {
-      const el =
-        record.target.nodeType === 1 ? (record.target as Element) : record.target.parentElement
-      if (el) {
-        state.styleTargets.add(el)
-        if (el.parentElement) state.styleTargets.add(el.parentElement)
-      }
-      state.pendingMutations.push(toEntry(record, patterns))
+      const pending = toEntry(record, patterns)
+      if (!pending) continue
+      state.styleTargets.add(pending.element)
+      if (pending.element.parentElement) state.styleTargets.add(pending.element.parentElement)
+      state.pendingMutations.push(pending)
     }
   }
 

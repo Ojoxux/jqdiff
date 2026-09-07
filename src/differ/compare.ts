@@ -10,6 +10,27 @@ export const DEFAULT_HEADER_ALLOWLIST = [
   'x-csrf-token',
 ]
 
+/**
+ * 明示指定が無いときにブラウザが送る値。
+ * XHR は setRequestHeader の呼び出しを記録できるが、fetch は Request のヘッダしか見えない。
+ * 既定値を補わないと、記録の非対称性がそのまま差分になる。
+ */
+const HEADER_DEFAULTS: Record<string, string> = { accept: '*/*' }
+
+/**
+ * ページ寿命のイベント。ライブラリが自分の初期化のために張るもので、
+ * 誰がハンドラを持つかは実装都合でしかない。初期化の結果は DOM 変更として記録される。
+ */
+const LIFECYCLE_EVENT_TYPES = new Set([
+  'DOMContentLoaded',
+  'load',
+  'readystatechange',
+  'pageshow',
+  'pagehide',
+  'beforeunload',
+  'unload',
+])
+
 /** オリジンを落とし、クエリをキー順に並べ替える。 */
 export function normalizeUrl(url: string): string {
   let path = url
@@ -115,7 +136,8 @@ export function compareNetwork(
     const hx = lowerKeys(x.headers)
     const hy = lowerKeys(y.headers)
     for (const h of allowed) {
-      push(`header:${h}`, `リクエストヘッダ ${h} が異なる`, hx[h] ?? null, hy[h] ?? null)
+      const fallback = HEADER_DEFAULTS[h] ?? null
+      push(`header:${h}`, `リクエストヘッダ ${h} が異なる`, hx[h] ?? fallback, hy[h] ?? fallback)
     }
 
     push(
@@ -169,8 +191,9 @@ export function groupDispatches(events: EventEntry[]): DispatchGroup[] {
 }
 
 export function compareEvents(baseline: EventEntry[], candidate: EventEntry[]): RawDiff[] {
-  const a = groupDispatches(baseline)
-  const b = groupDispatches(candidate)
+  const meaningful = (e: EventEntry): boolean => !LIFECYCLE_EVENT_TYPES.has(e.type)
+  const a = groupDispatches(baseline.filter(meaningful))
+  const b = groupDispatches(candidate.filter(meaningful))
   const diffs: RawDiff[] = []
   const max = Math.max(a.length, b.length)
 

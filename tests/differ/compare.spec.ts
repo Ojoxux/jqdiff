@@ -74,6 +74,22 @@ describe('compareNetwork', () => {
     expect(diffs.some((d) => d.prop === 'missing')).toBe(true)
   })
 
+  it('accept の未指定はブラウザ既定値として扱う', () => {
+    // XHR は setRequestHeader を記録できるが fetch は Request のヘッダしか見えない。
+    // どちらも実際に送られるのは */* なので差分にしてはならない。
+    const xhr = net({ headers: { accept: '*/*' } })
+    const fetched = net({ transport: 'fetch', headers: {} })
+    const diffs = compareNetwork([xhr], [fetched], IGNORE)
+    expect(diffs.map((d) => d.prop)).not.toContain('header:accept')
+  })
+
+  it('明示的な accept の喪失は検出する', () => {
+    const xhr = net({ headers: { accept: 'application/json' } })
+    const fetched = net({ transport: 'fetch', headers: {} })
+    const diffs = compareNetwork([xhr], [fetched], IGNORE)
+    expect(diffs.map((d) => d.prop)).toContain('header:accept')
+  })
+
   it('ignore.urls に合致する通信は無視する', () => {
     const analytics = net({ url: '/collect?id=1' })
     expect(compareNetwork([analytics], [], { ...IGNORE, urls: [/\/collect/] })).toEqual([])
@@ -96,6 +112,13 @@ function ev(over: Partial<EventEntry> = {}): EventEntry {
 describe('compareEvents', () => {
   it('同一なら差分なし', () => {
     expect(compareEvents([ev()], [ev()])).toEqual([])
+  })
+
+  it('ページ寿命のイベントは比較しない', () => {
+    // jQuery は自前の ready のために DOMContentLoaded を張る。
+    // 誰がハンドラを持つかは実装都合で、初期化の結果は DOM 変更に出る。
+    const ready = ev({ type: 'DOMContentLoaded', target: '#document', currentTarget: '#document' })
+    expect(compareEvents([ready], [])).toEqual([])
   })
 
   it('stopPropagation の欠落を検出する', () => {

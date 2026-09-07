@@ -48,7 +48,47 @@ export function collapseMutations(mutations: MutationEntry[]): MutationEntry[] {
     }
   }
 
-  return order.map((k) => map.get(k)!)
+  return order
+    .map((k) => cancelChildList(map.get(k)!))
+    .filter(
+      (m) => m.type !== 'childList' || (m.added?.length ?? 0) > 0 || (m.removed?.length ?? 0) > 0,
+    )
+}
+
+function tally(values: string[]): Map<string, number> {
+  const counts = new Map<string, number>()
+  for (const v of values) counts.set(v, (counts.get(v) ?? 0) + 1)
+  return counts
+}
+
+/** counts にある分だけ打ち消しながら、残ったものを元の順で返す。 */
+function keepUncancelled(values: string[], counts: Map<string, number>): string[] {
+  const kept: string[] = []
+  for (const v of values) {
+    const n = counts.get(v) ?? 0
+    if (n > 0) {
+      counts.set(v, n - 1)
+      continue
+    }
+    kept.push(v)
+  }
+  return kept
+}
+
+/**
+ * 同じ記述子が added と removed の両方にあれば打ち消す。
+ * 出入りの差し引きがゼロなら DOM には何も残らない。
+ * jQuery が機能検出のために足して外す要素や、script を作り直す実装差がここで消える。
+ */
+export function cancelChildList(m: MutationEntry): MutationEntry {
+  if (m.type !== 'childList') return m
+  const added = m.added ?? []
+  const removed = m.removed ?? []
+  return {
+    ...m,
+    added: keepUncancelled(added, tally(removed)),
+    removed: keepUncancelled(removed, tally(added)),
+  }
 }
 
 /** 実行順の揺らぎを消すため決定的に並べ替える。 */

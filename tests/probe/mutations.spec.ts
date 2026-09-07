@@ -23,7 +23,7 @@ describe('installMutationRecorder', () => {
     document.querySelector('#box')!.setAttribute('class', 'active')
     flush()
     expect(state.pendingMutations).toHaveLength(1)
-    expect(state.pendingMutations[0]).toMatchObject({
+    expect(state.pendingMutations[0]?.entry).toMatchObject({
       type: 'attributes',
       target: '#box',
       attributeName: 'class',
@@ -41,7 +41,9 @@ describe('installMutationRecorder', () => {
     li.className = 'new'
     list.appendChild(li)
     flush()
-    const childList = state.pendingMutations.filter((m) => m.type === 'childList')
+    const childList = state.pendingMutations
+      .map((m) => m.entry)
+      .filter((m) => m.type === 'childList')
     expect(childList.flatMap((m) => m.removed ?? [])).toContain('li.old')
     expect(childList.flatMap((m) => m.added ?? [])).toContain('li.new')
   })
@@ -51,7 +53,7 @@ describe('installMutationRecorder', () => {
     const { state, flush } = setup()
     document.querySelector('#msg')!.firstChild!.textContent = 'after'
     flush()
-    const cd = state.pendingMutations.find((m) => m.type === 'characterData')
+    const cd = state.pendingMutations.map((m) => m.entry).find((m) => m.type === 'characterData')
     expect(cd).toMatchObject({ target: '#msg', oldValue: 'before', newValue: 'after' })
   })
 
@@ -63,6 +65,25 @@ describe('installMutationRecorder', () => {
     const targets = Array.from(state.styleTargets)
     expect(targets).toContain(document.querySelector('#inner'))
     expect(targets).toContain(document.querySelector('#outer'))
+  })
+
+  it('script の出入りと空白テキストは記録しない', () => {
+    document.body.innerHTML = '<div id="host"></div>'
+    const { state, flush } = setup()
+    const host = document.querySelector('#host')!
+    host.innerHTML = '\n  <script>void 0;<\/script>\n  '
+    flush()
+    const added = state.pendingMutations.map((m) => m.entry).flatMap((m) => m.added ?? [])
+    expect(added).not.toContain('script')
+    expect(added).not.toContain('#text:""')
+  })
+
+  it('script 自身への属性変更は記録しない', () => {
+    document.body.innerHTML = '<script id="s"><\/script>'
+    const { state, flush } = setup()
+    document.querySelector('#s')!.setAttribute('type', 'false/')
+    flush()
+    expect(state.pendingMutations).toHaveLength(0)
   })
 
   it('dispose 後は記録しない', () => {

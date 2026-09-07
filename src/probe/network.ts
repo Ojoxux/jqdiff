@@ -1,4 +1,5 @@
 import type { NetworkEntry } from '../types.js'
+import { markInternal } from './events.js'
 import type { ProbeState } from './state.js'
 
 type XhrMeta = { method: string; url: string; headers: Record<string, string> }
@@ -44,10 +45,15 @@ function installXhr(state: ProbeState): () => void {
       state.pendingNetwork.push(entry)
       // entry は参照で保持しているため、レスポンス到着時に後から埋められる。
       // checkpoint は networkidle 後に採られるので、その時点では確定している。
-      this.addEventListener('loadend', () => {
-        entry.status = this.status
-        entry.ok = this.status >= 200 && this.status < 300
-      })
+      // 印をつけないとイベント記録側が自分のリスナーを拾ってしまい、
+      // XHR を使うベースラインにだけ loadend の処理が現れる。
+      this.addEventListener(
+        'loadend',
+        markInternal(() => {
+          entry.status = this.status
+          entry.ok = this.status >= 200 && this.status < 300
+        }),
+      )
     }
     return origSend.call(this, body ?? null)
   }

@@ -46,6 +46,19 @@ describe('installProbe', () => {
     expect(styles['#box']!.display).toBe('none')
   })
 
+  it('チェックポイント時に外れている要素への変更は含めない', () => {
+    const api = boot()
+    // ライブラリの機能検出と同じ形。作って、触って、捨てる。
+    const probe = document.createElement('div')
+    document.body.appendChild(probe)
+    probe.setAttribute('data-measured', '1')
+    probe.remove()
+    api.checkpoint(null)
+
+    const mutations = api.dump().checkpoints[0]!.mutations
+    expect(mutations.some((m) => m.attributeName === 'data-measured')).toBe(false)
+  })
+
   it('step と unresolved をチェックポイントに保存する', () => {
     const api = boot()
     const step = { index: 0, action: 'click' as const, selector: '#gone' }

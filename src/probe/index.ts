@@ -50,7 +50,9 @@ export function installProbe(): ProbeApi {
         index: state.checkpoints.length,
         step,
         unresolved,
-        mutations: state.pendingMutations,
+        // 文書から外れた要素への変更は落とす。ライブラリが機能検出のために
+        // 作って捨てる要素(jQuery の fieldset や計測用 div)がここで消える。
+        mutations: state.pendingMutations.filter((m) => m.element.isConnected).map((m) => m.entry),
         network: state.pendingNetwork,
         events: state.pendingEvents,
         styles: collectStyles(

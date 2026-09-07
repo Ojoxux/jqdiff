@@ -68,6 +68,24 @@ describe('collapseMutations', () => {
     expect(out[0]!.added).toEqual(['li', 'li.new'])
     expect(out[0]!.removed).toEqual(['li.old'])
   })
+
+  it('足して外しただけの出入りは打ち消す', () => {
+    const out = collapseMutations([
+      { type: 'childList', target: 'body', added: ['fieldset', 'div.real'], removed: [] },
+      { type: 'childList', target: 'body', added: [], removed: ['fieldset'] },
+    ])
+    expect(out).toHaveLength(1)
+    expect(out[0]!.added).toEqual(['div.real'])
+    expect(out[0]!.removed).toEqual([])
+  })
+
+  it('打ち消して何も残らない childList は落とす', () => {
+    const out = collapseMutations([
+      { type: 'childList', target: 'html', added: ['div'], removed: [] },
+      { type: 'childList', target: 'html', added: [], removed: ['div'] },
+    ])
+    expect(out).toEqual([])
+  })
 })
 
 describe('sortMutations', () => {

@@ -57,12 +57,10 @@
 
   // 罠 4: fetch は 4xx/5xx で reject しない
   $('[data-testid="fail-btn"]').addEventListener('click', function () {
+    // body が無いので Content-Type は付けない。jQuery も data 無しでは付けない。
     var request = fetch('/api/fail', {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
-        'X-Requested-With': 'XMLHttpRequest'
-      }
+      headers: { 'X-Requested-With': 'XMLHttpRequest' }
     })
     if (trap(4)) {
       request.catch(function () { $('#error-box').textContent = 'failed' })

@@ -84,6 +84,20 @@ Defined in [`src/types.ts`](../src/types.ts).
 characterData, and both old-value flags. It observes `document` rather than `document.documentElement`
 because `addInitScript` runs before `documentElement` exists.
 
+Three things are excluded at record time, because recording them produces differences that exist in
+every correct migration:
+
+- **`<script>` nodes** — their shape necessarily differs (jQuery's `.html()` rewrites `type` and
+  evaluates the script by appending it to `<head>`; `innerHTML` does not execute it at all, so a
+  faithful migration re-creates the node). What the script *did* is still recorded, as trap 8 shows.
+- **Whitespace-only text nodes** — not observable, and their count varies with the number of script
+  tags in the page.
+- **Elements no longer connected to the document at checkpoint time** — libraries create, measure and
+  discard elements for feature detection (jQuery appends a `<fieldset>` and a measuring `<div>`).
+  A change to a node that ends up detached has no observable effect. The check is deferred to
+  checkpoint time rather than record time so that the "build detached, then append" idiom still gets
+  recorded.
+
 **Network.** `XMLHttpRequest.prototype.open` / `setRequestHeader` / `send` and `window.fetch` are
 wrapped to record method, URL, headers, body, and status. Whether the *caller* treated a response as
 an error is deliberately not tracked — see §10, trap 4.
@@ -98,8 +112,9 @@ Listener identity is kept in a `WeakMap` keyed by `${type}|${capture}` so that
 stops working under the probe.
 
 **Computed styles.** Sampled at each checkpoint via `getComputedStyle`, restricted to elements that
-mutated in that interval, their parents, and the step's target element. Walking the whole DOM is too
-expensive. The default property set (overridable) covers visibility, box model, typography, flex, and
+mutated in that interval and their parents. Walking the whole DOM is too expensive. The consequence
+is that an element only appears in the style sample on a side that touched it — see §9, Styles, and
+trap 5. The default property set (overridable) covers visibility, box model, typography, flex, and
 interaction properties.
 
 ## 7. Stable selectors
@@ -126,6 +141,7 @@ a jQuery → native migration reliably produces.
 | Collapse generated ids in selectors and attribute values to `<gen>` | jQuery/plugin counters differ run to run |
 | Sort class-attribute tokens | `"a b"` vs `"b a"` is not a difference |
 | Collapse mutations sharing `(target, type, attributeName)` within a checkpoint, keeping the first `oldValue` and last `newValue` | Animation intermediate frames otherwise bury the real diff |
+| Cancel `childList` entries where the same node descriptor appears in both `added` and `removed`, dropping the entry if nothing survives | A node added and removed again leaves nothing behind: library feature-detection scaffolding, and script nodes being re-created |
 | Sort collapsed mutations by `(target, type, attributeName)` | Mutation order within a checkpoint is not meaningful |
 | Preserve order for network and events | Execution order *is* the meaning here |
 
@@ -134,6 +150,13 @@ a jQuery → native migration reliably produces.
 **Network.** Method, URL (query keys sorted), an allowlist of headers (`content-type`,
 `x-requested-with`, `accept`, `authorization`, `x-csrf-token`), body (JSON deep-compared with sorted
 keys; urlencoded compared with sorted keys; otherwise string equality), and status.
+
+A header absent on one side is compared against the browser's default where one exists — currently
+`accept: */*`. The two transports are not observable in the same way: XHR exposes every
+`setRequestHeader` call, while `fetch` only exposes what was put on the `Request`, even though the
+browser sends `Accept: */*` either way. Without the default, that asymmetry becomes a finding on
+every single request. An *explicitly different* value (`application/json` dropped to nothing) is
+still reported.
 
 **Events — compared per dispatch, not per handler.** jQuery's `.on('click', 'li', fn)` delegation
 registers *one* native listener for N handlers, while a faithful native migration registers N
@@ -149,9 +172,19 @@ This compares how the event was *semantically handled*, not how many listeners w
 Rewriting `return false` to a bare `preventDefault()` shows up in both `path` and
 `propagationStopped`.
 
+Page-lifecycle events (`DOMContentLoaded`, `load`, `readystatechange`, `pageshow`, `pagehide`,
+`beforeunload`, `unload`) are excluded. jQuery installs its own `DOMContentLoaded` listener to drive
+`$(fn)`; native code does not need one. Which layer owns the listener is an implementation detail,
+and whatever the handler *did* is recorded as mutations anyway — an initialization that stops running
+is still caught, just through a channel that reflects the user-visible consequence.
+
 **Styles.** Per selector × property, string equality. Selectors present on only one side are skipped:
 the sampling set is mutation-driven, so a one-sided selector reflects a sampling-scope difference
-that is already reported as a mutation diff. Reporting it again would double-count.
+that is already reported as a mutation diff. Reporting it again would double-count — and the value
+for the missing side is genuinely unknown, so any reported "before/after" pair would be invented.
+
+The consequence is worth stating plainly: **when one build performs no mutation at all, the
+difference surfaces as a mutation finding, not a style finding.** Trap 5 is exactly this case.
 
 **Mutations.** Set difference over normalized entries.
 
@@ -184,6 +217,12 @@ After each step the runner waits for `networkidle` (best-effort, with a timeout)
 `requestAnimationFrame`s, then the configured `waitAfterStep`. Initial navigation uses
 `domcontentloaded`, not `networkidle`, because a polling page never reaches network idle during
 `goto`.
+
+**Every wait is bounded, including the frame wait.** A renderer that the OS or the browser has
+decided to background runs neither `requestAnimationFrame` nor `setTimeout`, so an in-page deadline
+is not sufficient — the frame wait is additionally raced against a Node-side deadline, and Chromium
+is launched with background/occlusion throttling disabled. Left unbounded, a single throttled page
+stalls the entire replay indefinitely rather than failing.
 
 If a selector fails to resolve during replay, the runner **does not continue silently**. The
 checkpoint is marked `unresolved`, excluded from comparison, and surfaced as a `StructuralIssue` at
@@ -222,10 +261,18 @@ regressions drawn from real incidents, individually enabled via `?traps=1,3,5`:
 | 2 | `return false` rewritten to `preventDefault()` only | event `propagationStopped` / `path` (critical) + parent handler side effect |
 | 3 | `$.ajax` → `fetch`, losing `X-Requested-With` and the urlencoded body | network headers and body (critical) |
 | 4 | `fetch` does not reject on 500, so the error handler never runs | missing error text (warning) |
-| 5 | `.css('width', 300)` → `style.width = 300`, dropping the implicit `px` | computed `width` (warning) |
+| 5 | `.css('width', 300)` → `style.width = 300`, dropping the implicit `px` | `style` attribute mutation present only in the baseline (warning) — see below |
 | 6 | jQuery's empty-set no-op becomes a `TypeError` on `querySelector(...)` | all subsequent DOM updates missing |
 | 7 | Delegated handler registration order swaps | rendered text order (warning); *not* an event diff, by design |
 | 8 | `.html()` executes `<script>`; `innerHTML` does not | `data-*` attribute mutation (warning) |
+
+Trap 5 is worth dwelling on, because it shows where the *channel* a regression arrives through is not
+the obvious one. Assigning a unitless number to `style.width` is silently ignored by the browser, so
+the candidate performs **no mutation at all** — which means `#bar` is never sampled for computed
+style on that side, and §9's one-sided-selector rule skips it. The regression is caught, at
+`warning`, as a `style` attribute mutation present only in the baseline. Detection is not lost; the
+report says "the baseline changed this element and the candidate never touched it" instead of
+"width is 0px, was 300px".
 
 `tests/traps.spec.ts` asserts, for each trap, the expected finding kind, severity, and target — this
 catches jqdiff failing to detect a regression.

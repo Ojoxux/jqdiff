@@ -24,18 +24,42 @@ type ProbeWindow = {
   }
 }
 
+/**
+ * ページ側が止まっていても戻ってくることを保証する。
+ * レンダラが凍っていると rAF も setTimeout も発火しないため、
+ * ページ内で上限を切るだけでは足りず Node 側でも打ち切る必要がある。
+ */
+async function withDeadline<T>(work: Promise<T>, ms: number): Promise<T | null> {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const deadline = new Promise<null>((resolve) => {
+    timer = setTimeout(() => resolve(null), ms)
+  })
+  try {
+    return await Promise.race([work, deadline])
+  } finally {
+    if (timer) clearTimeout(timer)
+  }
+}
+
 async function settle(page: Page, extraWait: number): Promise<void> {
   try {
     await page.waitForLoadState('networkidle', { timeout: 5000 })
   } catch {
     // networkidle に到達しないページ(ポーリング等)でも先に進む
   }
-  await page.evaluate(
-    () =>
-      new Promise<void>((resolve) => {
-        requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
-      }),
-  )
+  // 描画が 2 フレーム進むのを待つ。アニメーションの結果を見たいのが目的なので、
+  // 待てなかった場合に再生を止める理由はない。
+  await withDeadline(
+    page.evaluate(
+      () =>
+        new Promise<void>((resolve) => {
+          const done = (): void => resolve()
+          requestAnimationFrame(() => requestAnimationFrame(done))
+          setTimeout(done, 1000)
+        }),
+    ),
+    5000,
+  ).catch(() => null)
   if (extraWait > 0) await page.waitForTimeout(extraWait)
 }
 
@@ -81,7 +105,16 @@ export async function runScenario(options: RunOptions): Promise<Trace> {
   const { url, scenario, config, probePath, headless = true, stepTimeout = 5000 } = options
   const probeSource = await readFile(probePath, 'utf8')
 
-  const browser = await chromium.launch({ headless })
+  const browser = await chromium.launch({
+    headless,
+    // OS もブラウザも「見えていないページ」の時間を止めにかかる。
+    // 止まると rAF もタイマーも進まず、待ちがそのまま固まる。
+    args: [
+      '--disable-background-timer-throttling',
+      '--disable-backgrounding-occluded-windows',
+      '--disable-renderer-backgrounding',
+    ],
+  })
   try {
     const context = await browser.newContext({ viewport: scenario.viewport })
     const page = await context.newPage()
