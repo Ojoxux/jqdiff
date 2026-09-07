@@ -1,0 +1,13 @@
+body { font-family: sans-serif; margin: 16px; }
+section { margin-bottom: 24px; }
+
+/* 罠 1 の要。block ではないので、素朴な show() 実装との差が computed display に出る */
+#badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  background: #eef;
+}
+
+#bar { height: 12px; width: 0; background: #48c; }
+#bubble-log, #save-result, #error-box, #after-missing, #order-log { min-height: 1em; }

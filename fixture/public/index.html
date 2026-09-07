@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <title>jqdiff fixture</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <h1>jqdiff fixture</h1>
+
+  <section>
+    <button type="button" data-testid="toggle-badge">toggle badge</button>
+    <span id="badge" data-testid="badge">NEW</span>
+  </section>
+
+  <section>
+    <div id="outer" data-testid="outer">
+      <a id="inner-link" data-testid="inner-link" href="#anchor">link</a>
+    </div>
+    <div id="bubble-log" data-testid="bubble-log"></div>
+  </section>
+
+  <section>
+    <form id="save-form" data-testid="save-form">
+      <input name="title" data-testid="title-input" value="">
+      <button type="submit" data-testid="save-btn">save</button>
+    </form>
+    <div id="save-result" data-testid="save-result"></div>
+  </section>
+
+  <section>
+    <button type="button" data-testid="fail-btn">fail request</button>
+    <div id="error-box" data-testid="error-box"></div>
+  </section>
+
+  <section>
+    <button type="button" data-testid="widen-btn">widen</button>
+    <div id="bar" data-testid="bar"></div>
+  </section>
+
+  <section>
+    <button type="button" data-testid="missing-btn">update via missing</button>
+    <div id="after-missing" data-testid="after-missing"></div>
+  </section>
+
+  <section>
+    <ul id="list" data-testid="list"><li data-testid="item-1">item 1</li></ul>
+    <div id="order-log" data-testid="order-log"></div>
+  </section>
+
+  <section>
+    <button type="button" data-testid="inject-btn">inject</button>
+    <div id="inject-target" data-testid="inject-target"></div>
+  </section>
+
+  <!--SCRIPTS-->
+</body>
+</html>
