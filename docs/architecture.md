@@ -123,7 +123,7 @@ interaction properties.
 
 1. `[data-testid="…"]`
 2. `#id`, unless the id matches a generated-id pattern
-3. `[name="…"]` for form controls
+3. `tag[name="…"]`, for any element carrying a `name` attribute
 4. A structural path up to `body`, with generated class names stripped and `:nth-child(n)` always
    appended for determinism
 
