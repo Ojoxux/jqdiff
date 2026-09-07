@@ -1,3 +1,6 @@
+import { stat } from 'node:fs/promises'
+import { join } from 'node:path'
+import { pathToFileURL } from 'node:url'
 import type { JqdiffConfig } from './types.js'
 
 export const DEFAULT_GENERATED_ID_PATTERNS: RegExp[] = [
@@ -55,13 +58,39 @@ export function resolveConfig(user: UserConfig = {}): JqdiffConfig {
   }
 }
 
-/** プロジェクトルートの jqdiff.config.ts を読む。無ければデフォルト。 */
+export const CONFIG_FILENAME = 'jqdiff.config.ts'
+
+/**
+ * プロジェクトルートの jqdiff.config.ts を読む。無ければデフォルト。
+ *
+ * 「ファイルが無い」だけがデフォルトへの正当な入口で、それ以外の失敗は必ず投げる。
+ * 握り潰すと、ノイズを削るために ignore を書いている最中に無言でデフォルトへ戻り、
+ * 設定が効いていないのか本当にノイズが消えたのかを区別できなくなる。
+ */
 export async function loadConfig(cwd: string): Promise<JqdiffConfig> {
-  const path = `${cwd}/jqdiff.config.ts`
+  const path = join(cwd, CONFIG_FILENAME)
+
   try {
-    const mod = await import(/* @vite-ignore */ path)
-    return resolveConfig(mod.default ?? {})
+    await stat(path)
   } catch {
     return resolveConfig({})
   }
+
+  let mod: { default?: unknown }
+  try {
+    // 絶対パスをそのまま import 指定子にすると環境差が出るため file:// URL にする
+    mod = (await import(/* @vite-ignore */ pathToFileURL(path).href)) as { default?: unknown }
+  } catch (error) {
+    throw new Error(`${path} を読み込めませんでした`, { cause: error })
+  }
+
+  const user = mod.default
+  if (user === undefined) {
+    throw new Error(`${path} に default export がありません`)
+  }
+  if (typeof user !== 'object' || user === null) {
+    throw new Error(`${path} の default export はオブジェクトである必要があります`)
+  }
+
+  return resolveConfig(user as UserConfig)
 }
